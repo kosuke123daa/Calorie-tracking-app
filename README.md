@@ -6,6 +6,7 @@ Next.js 16 (App Router) + Supabase。Vercel にデプロイする前提。
 ## 機能
 
 - 日付ごとに「食べたもの / kcal」を追加・編集・削除
+- 料理の写真から品ごとのカロリーを Claude で推定 → 内容を確認・修正して登録
 - 日ごとの合計カロリーを棒グラフ表示（7 / 30 / 90 日）。バーをタップするとその日を表示
 - Supabase Auth のメール+パスワードでログイン（他アプリと同じユーザーでログイン可）
 
@@ -29,6 +30,7 @@ Salary-Management などと同じ Supabase プロジェクトを使う前提で�
    | `NEXT_PUBLIC_SUPABASE_URL` | Supabase の Project URL |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon public key |
    | `SUPABASE_SERVICE_ROLE_KEY` | service_role key（サーバー専用） |
+   | `ANTHROPIC_API_KEY` | Claude API キー（写真からの推定に使用、サーバー専用） |
 
 3. デプロイ
 

@@ -13,6 +13,7 @@ import { authedFetch } from "@/lib/api";
 import { addDays, cn, formatDateLabel, formatKcal, toDateKey } from "@/lib/utils";
 import type { CalorieEntry } from "@/types/calorie";
 import type { DailyTotal } from "@/components/calorie/CalorieChart";
+import { PhotoEstimate } from "@/components/calorie/PhotoEstimate";
 
 const CalorieChart = dynamic(
   () => import("@/components/calorie/CalorieChart").then((m) => m.CalorieChart),
@@ -235,6 +236,10 @@ export default function Home() {
                 ))}
               </ul>
             )}
+
+            <div className="border-t pt-4">
+              <PhotoEstimate date={selectedDate} onSaved={fetchEntries} />
+            </div>
 
             <form onSubmit={handleSubmit} className="border-t pt-4 space-y-3">
               <p className="text-sm font-medium">{editing ? "記録を編集" : "記録を追加"}</p>
