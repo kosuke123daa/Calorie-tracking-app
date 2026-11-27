@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { getRequestUser } from "@/lib/supabase";
+import {
+  anthropicErrorResponse,
+  CLAUDE_MODEL,
+  FALLBACK_OPTIONS,
+  getAnthropicClient,
+  missingKeyResponse,
+} from "@/lib/anthropic";
 
 // Image analysis can take a while; give the function room on Vercel.
 export const maxDuration = 60;
@@ -32,20 +38,12 @@ const SYSTEM_PROMPT = `あなたは管理栄養士です。食事の写真から
 - 料理名は日本語で、一般的な名前にしてください。
 - 食べ物が写っていない場合は items を空にしてください。`;
 
-let anthropic: Anthropic | null = null;
-function getClient() {
-  // Reads ANTHROPIC_API_KEY from the environment.
-  anthropic ??= new Anthropic();
-  return anthropic;
-}
-
 export async function POST(request: NextRequest) {
   const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY が設定されていません" }, { status: 500 });
-  }
+  const noKey = missingKeyResponse();
+  if (noKey) return noKey;
 
   const body = (await request.json().catch(() => null)) as { media_type?: unknown; data?: unknown } | null;
   const mediaType = body?.media_type;
@@ -61,16 +59,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const response = await getClient().beta.messages.parse({
-      model: "claude-opus-5-5",
+    const response = await getAnthropicClient().beta.messages.parse({
+      model: CLAUDE_MODEL,
       max_tokens: 16000,
       output_config: {
         effort: "medium",
         format: betaZodOutputFormat(EstimateSchema),
       },
-      // On a safety decline, let the API retry on its recommended fallback model.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      ...FALLBACK_OPTIONS,
       system: SYSTEM_PROMPT,
       messages: [
         {
@@ -100,13 +96,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ items });
   } catch (error) {
-    if (error instanceof Anthropic.RateLimitError) {
-      return NextResponse.json({ error: "混み合っています。少し待ってから再試行してください" }, { status: 429 });
-    }
-    if (error instanceof Anthropic.APIError) {
-      console.error("Anthropic API error", error.status, error.message);
-      return NextResponse.json({ error: "画像の解析に失敗しました" }, { status: 502 });
-    }
-    throw error;
+    return anthropicErrorResponse(error, "画像の解析に失敗しました");
   }
 }

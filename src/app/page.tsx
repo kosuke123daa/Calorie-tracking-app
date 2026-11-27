@@ -14,6 +14,7 @@ import { addDays, cn, formatDateLabel, formatKcal, toDateKey } from "@/lib/utils
 import type { CalorieEntry } from "@/types/calorie";
 import type { DailyTotal } from "@/components/calorie/CalorieChart";
 import { PhotoEstimate } from "@/components/calorie/PhotoEstimate";
+import { ProteinEstimate } from "@/components/calorie/ProteinEstimate";
 
 const CalorieChart = dynamic(
   () => import("@/components/calorie/CalorieChart").then((m) => m.CalorieChart),
@@ -212,6 +213,12 @@ export default function Home() {
               <span className="text-sm text-muted-foreground">合計</span>
               <span className="text-2xl font-bold tabular-nums">{formatKcal(dayTotal)}</span>
             </div>
+
+            <ProteinEstimate
+              key={`${selectedDate}:${dayEntries.map((e) => `${e.id}-${e.name}-${e.calories}`).join(",")}`}
+              date={selectedDate}
+              hasEntries={dayEntries.length > 0}
+            />
 
             {dayEntries.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
