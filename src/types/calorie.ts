@@ -3,6 +3,7 @@ export interface CalorieEntry {
   eaten_on: string; // YYYY-MM-DD
   name: string;
   calories: number;
+  protein_g?: number | null; // estimated protein (g); null = not estimated
   created_at?: string;
   updated_at?: string;
 }

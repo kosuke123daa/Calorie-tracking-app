@@ -14,7 +14,7 @@ import { addDays, cn, formatDateLabel, formatKcal, toDateKey } from "@/lib/utils
 import type { CalorieEntry } from "@/types/calorie";
 import type { DailyTotal } from "@/components/calorie/CalorieChart";
 import { PhotoEstimate } from "@/components/calorie/PhotoEstimate";
-import { ProteinEstimate } from "@/components/calorie/ProteinEstimate";
+import { formatGrams, ProteinEstimate } from "@/components/calorie/ProteinEstimate";
 
 const CalorieChart = dynamic(
   () => import("@/components/calorie/CalorieChart").then((m) => m.CalorieChart),
@@ -214,11 +214,7 @@ export default function Home() {
               <span className="text-2xl font-bold tabular-nums">{formatKcal(dayTotal)}</span>
             </div>
 
-            <ProteinEstimate
-              key={`${selectedDate}:${dayEntries.map((e) => `${e.id}-${e.name}-${e.calories}`).join(",")}`}
-              date={selectedDate}
-              hasEntries={dayEntries.length > 0}
-            />
+            <ProteinEstimate date={selectedDate} entries={dayEntries} onSaved={fetchEntries} />
 
             {dayEntries.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
@@ -232,7 +228,12 @@ export default function Home() {
                     className={cn("flex items-center gap-2 py-2", editing?.id === entry.id && "bg-muted/60 rounded-md px-2")}
                   >
                     <span className="flex-1 min-w-0 truncate">{entry.name}</span>
-                    <span className="tabular-nums text-sm font-medium">{formatKcal(entry.calories)}</span>
+                    <span className="flex flex-col items-end leading-tight">
+                      <span className="tabular-nums text-sm font-medium">{formatKcal(entry.calories)}</span>
+                      {entry.protein_g != null && (
+                        <span className="tabular-nums text-xs text-muted-foreground">P {formatGrams(Number(entry.protein_g))}</span>
+                      )}
+                    </span>
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEdit(entry)} aria-label="編集">
                       <Pencil className="h-4 w-4" />
                     </Button>

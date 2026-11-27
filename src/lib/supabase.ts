@@ -2,6 +2,16 @@ import { createClient, SupabaseClient, User } from "@supabase/supabase-js";
 
 export const ENTRIES_TABLE = "calorie_app_entries";
 
+const BASE_COLUMNS = "id, eaten_on, name, calories, created_at, updated_at";
+/** Columns returned to the client. protein_g comes from migration 002. */
+export const ENTRY_COLUMNS = `${BASE_COLUMNS}, protein_g`;
+export const ENTRY_COLUMNS_WITHOUT_PROTEIN = BASE_COLUMNS;
+
+/** True when a query failed because migration 002 (protein_g) hasn't been applied yet. */
+export function isMissingProteinColumn(error: { message: string } | null) {
+  return !!error && error.message.includes("protein_g");
+}
+
 let client: SupabaseClient | null = null;
 let serviceClient: SupabaseClient | null = null;
 

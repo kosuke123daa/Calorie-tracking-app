@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import { ENTRIES_TABLE, getRequestUser, getSupabaseServiceClient } from "@/lib/supabase";
+import { ENTRIES_TABLE, getRequestUser, getSupabaseServiceClient, isMissingProteinColumn } from "@/lib/supabase";
 import { isDateKey } from "@/lib/validate";
 import {
   anthropicErrorResponse,
@@ -28,8 +28,10 @@ const SYSTEM_PROMPT = `あなたは管理栄養士です。1日に食べたも�
 - 品名が曖昧な場合（例:「朝ごはん」）は、そのカロリーの一般的な日本の食事として推定してください。
 - 入力のすべての id について、1件ずつ結果を返してください。`;
 
-// POST /api/protein { date: "YYYY-MM-DD" }
-// Estimates protein for the signed-in user's entries on that date. Nothing is saved.
+// POST /api/protein { date: "YYYY-MM-DD", all?: boolean }
+// Estimates protein for the signed-in user's entries on that date and saves it
+// to calorie_app_entries.protein_g. By default only entries without an estimate
+// are sent; `all: true` re-estimates every entry of the day.
 export async function POST(request: NextRequest) {
   const user = await getRequestUser(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -37,25 +39,33 @@ export async function POST(request: NextRequest) {
   const noKey = missingKeyResponse();
   if (noKey) return noKey;
 
-  const body = (await request.json().catch(() => null)) as { date?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as { date?: unknown; all?: unknown } | null;
   if (!isDateKey(body?.date)) {
     return NextResponse.json({ error: "date must be YYYY-MM-DD" }, { status: 400 });
   }
 
-  const { data: entries, error } = await getSupabaseServiceClient()
+  const supabase = getSupabaseServiceClient();
+  const { data: entries, error } = await supabase
     .from(ENTRIES_TABLE)
-    .select("id, name, calories")
+    .select("id, name, calories, protein_g")
     .eq("user_id", user.id)
     .eq("eaten_on", body.date)
     .order("created_at", { ascending: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!entries || entries.length === 0) {
-    return NextResponse.json({ error: "この日の記録がありません" }, { status: 400 });
+  if (isMissingProteinColumn(error)) {
+    return NextResponse.json(
+      { error: "DB にたんぱく質の列がありません。Supabase で 002_add_protein_g.sql を実行してください" },
+      { status: 409 }
+    );
   }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const list = entries.map((e) => `- id: ${e.id} / 品名: ${e.name} / ${e.calories} kcal`).join("\n");
+  const targets = (entries ?? []).filter((e) => body.all === true || e.protein_g === null);
+  if (targets.length === 0) return NextResponse.json({ updated: 0 });
 
+  const list = targets.map((e) => `- id: ${e.id} / 品名: ${e.name} / ${e.calories} kcal`).join("\n");
+
+  let estimates: Map<number, number>;
   try {
     const response = await getAnthropicClient().beta.messages.parse({
       model: CLAUDE_MODEL,
@@ -66,7 +76,7 @@ export async function POST(request: NextRequest) {
       },
       ...FALLBACK_OPTIONS,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `今日食べたもの:\n${list}` }],
+      messages: [{ role: "user", content: `食べたもの:\n${list}` }],
     });
 
     if (response.stop_reason === "refusal") {
@@ -75,21 +85,24 @@ export async function POST(request: NextRequest) {
     if (!response.parsed_output) {
       return NextResponse.json({ error: "推定結果を読み取れませんでした" }, { status: 502 });
     }
-
-    const proteinById = new Map(response.parsed_output.items.map((i) => [i.id, i.protein_g]));
-    const items = entries.map((e) => {
-      const g = proteinById.get(e.id);
-      return {
-        id: e.id,
-        name: e.name,
-        calories: e.calories,
-        protein: g === undefined ? null : Math.max(0, Math.round(g * 10) / 10),
-      };
-    });
-    const total = Math.round(items.reduce((s, i) => s + (i.protein ?? 0), 0) * 10) / 10;
-
-    return NextResponse.json({ items, total });
+    estimates = new Map(response.parsed_output.items.map((i) => [i.id, i.protein_g]));
   } catch (error) {
     return anthropicErrorResponse(error, "たんぱく質の推定に失敗しました");
   }
+
+  const results = await Promise.all(
+    targets
+      .filter((e) => estimates.has(e.id))
+      .map((e) =>
+        supabase
+          .from(ENTRIES_TABLE)
+          .update({ protein_g: Math.min(9999.9, Math.max(0, Math.round(estimates.get(e.id)! * 10) / 10)) })
+          .eq("id", e.id)
+          .eq("user_id", user.id)
+      )
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) return NextResponse.json({ error: failed.error.message }, { status: 500 });
+
+  return NextResponse.json({ updated: results.length });
 }

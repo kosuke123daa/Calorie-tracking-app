@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ENTRIES_TABLE, getRequestUser, getSupabaseServiceClient } from "@/lib/supabase";
+import {
+  ENTRIES_TABLE,
+  ENTRY_COLUMNS_WITHOUT_PROTEIN,
+  getRequestUser,
+  getSupabaseServiceClient,
+  isMissingProteinColumn,
+} from "@/lib/supabase";
 import { parseEntryInput } from "@/lib/validate";
 
 type Context = { params: Promise<{ id: string }> };
@@ -22,13 +28,29 @@ export async function PUT(request: NextRequest, context: Context) {
   const input = parseEntryInput(await request.json().catch(() => null));
   if (typeof input === "string") return NextResponse.json({ error: input }, { status: 400 });
 
-  const { data, error } = await getSupabaseServiceClient()
+  const supabase = getSupabaseServiceClient();
+  const { data: current, error: readError } = await supabase
     .from(ENTRIES_TABLE)
-    .update({ ...input, updated_at: new Date().toISOString() })
+    .select("name, calories")
     .eq("id", id)
     .eq("user_id", user.id)
-    .select("id, eaten_on, name, calories, created_at, updated_at")
     .maybeSingle();
+  if (readError) return NextResponse.json({ error: readError.message }, { status: 500 });
+  if (!current) return notFound();
+
+  // A protein estimate no longer matches once the food or its amount changes.
+  const stale = current.name !== input.name || current.calories !== input.calories;
+  const update = (extra: Record<string, unknown>) =>
+    supabase
+      .from(ENTRIES_TABLE)
+      .update({ ...input, ...extra, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .select(ENTRY_COLUMNS_WITHOUT_PROTEIN)
+      .maybeSingle();
+
+  let { data, error } = await update(stale ? { protein_g: null } : {});
+  if (stale && isMissingProteinColumn(error)) ({ data, error } = await update({}));
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return notFound();

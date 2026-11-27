@@ -1,42 +1,39 @@
 "use client";
 
 import { useState } from "react";
-import { Beef, Loader2, X } from "lucide-react";
+import { Beef, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { authedFetch } from "@/lib/api";
+import type { CalorieEntry } from "@/types/calorie";
 
 interface Props {
   date: string;
-  hasEntries: boolean;
+  entries: CalorieEntry[];
+  onSaved: () => Promise<void> | void;
 }
 
-interface Result {
-  items: { id: number; name: string; calories: number; protein: number | null }[];
-  total: number;
-}
+export const formatGrams = (g: number) => `${g.toFixed(1)} g`;
 
-const formatGrams = (g: number) => `${g.toFixed(1)} g`;
-
-/**
- * Asks Claude for an estimate of the day's protein. Display only, nothing is saved.
- * Remount it (via `key`) when the day's entries change so a stale result disappears.
- */
-export function ProteinEstimate({ date, hasEntries }: Props) {
-  const [result, setResult] = useState<Result | null>(null);
+/** Day protein total (saved in the DB) plus a button that asks Claude to fill in missing estimates. */
+export function ProteinEstimate({ date, entries, onSaved }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const estimate = async () => {
+  const estimated = entries.filter((e) => e.protein_g != null);
+  const missing = entries.length - estimated.length;
+  const total = estimated.reduce((s, e) => s + Number(e.protein_g), 0);
+
+  const estimate = async (all: boolean) => {
     setLoading(true);
     setError("");
     try {
-      const res = await authedFetch("/api/protein", { method: "POST", body: JSON.stringify({ date }) });
-      const json = await res.json().catch(() => ({}));
+      const res = await authedFetch("/api/protein", { method: "POST", body: JSON.stringify({ date, all }) });
       if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
         setError(json.error ?? "推定に失敗しました");
         return;
       }
-      setResult(json as Result);
+      await onSaved();
     } catch (e) {
       console.error(e);
       setError("推定に失敗しました");
@@ -45,40 +42,46 @@ export function ProteinEstimate({ date, hasEntries }: Props) {
     }
   };
 
-  if (!result) {
-    return (
-      <div className="space-y-2">
-        <Button type="button" variant="outline" className="w-full" onClick={estimate} disabled={!hasEntries || loading}>
-          {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Beef className="h-4 w-4 mr-2" />}
-          {loading ? "たんぱく質を推定中..." : "この日のたんぱく質量を推定"}
-        </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </div>
-    );
-  }
+  if (entries.length === 0) return null;
 
   return (
-    <div className="rounded-lg border p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">たんぱく質（推定）</span>
-        <div className="flex items-center gap-1">
-          <span className="text-xl font-bold tabular-nums">{formatGrams(result.total)}</span>
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setResult(null)} aria-label="閉じる">
-            <X className="h-4 w-4" />
-          </Button>
+    <div className="space-y-2">
+      {estimated.length > 0 && (
+        <div className="rounded-lg border px-4 py-2 flex items-baseline justify-between">
+          <span className="text-sm text-muted-foreground">
+            たんぱく質（推定）
+            {missing > 0 && <span className="ml-1 text-xs">※{missing}品は未推定</span>}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="text-xl font-bold tabular-nums">{formatGrams(total)}</span>
+            {missing === 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => estimate(true)}
+                disabled={loading}
+                aria-label="すべて再推定"
+                title="すべて再推定"
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            )}
+          </span>
         </div>
-      </div>
-      <ul className="text-sm divide-y">
-        {result.items.map((item) => (
-          <li key={item.id} className="flex justify-between gap-2 py-1">
-            <span className="truncate">{item.name}</span>
-            <span className="tabular-nums text-muted-foreground shrink-0">
-              {item.protein === null ? "—" : formatGrams(item.protein)}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <p className="text-xs text-muted-foreground">品名とカロリーから AI が推定した目安です。</p>
+      )}
+      {missing > 0 && (
+        <Button type="button" variant="outline" className="w-full" onClick={() => estimate(false)} disabled={loading}>
+          {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Beef className="h-4 w-4 mr-2" />}
+          {loading
+            ? "たんぱく質を推定中..."
+            : estimated.length === 0
+              ? "この日のたんぱく質量を推定"
+              : `未推定の${missing}品のたんぱく質を推定`}
+        </Button>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }
